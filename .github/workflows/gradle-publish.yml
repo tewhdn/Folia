@@ -1,0 +1,57 @@
+name: Build and Publish Folia Server
+
+on:
+  release:
+    types: [created]  # 仅在创建 GitHub Release 时触发
+  workflow_dispatch:  # 支持手动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 允许上传 Release 附件
+      packages: write  # 允许发布到 GitHub Packages
+
+    steps:
+      # 步骤 1: 检出代码（含子模块）
+      - name: Checkout Folia
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive  # 确保拉取 Folia 子模块
+
+      # 步骤 2: 设置 JDK 17 + Gradle 缓存
+      - name: Setup Java & Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle  # 缓存依赖加速构建
+
+      # 步骤 3: 国内用户镜像加速（可选）
+      - name: Configure Mirror for China
+        run: |
+          # 替换 Gradle 镜像源为阿里云
+          sed -i "s/mavenCentral()/maven { url 'https://maven.aliyun.com/repository/public' }/g" settings.gradle.kts
+          # 替换 Git 仓库镜像（加速源码下载）
+          git remote set-url origin https://ghproxy.com/https://github.com/PaperMC/Folia.git
+
+      # 步骤 4: 构建 Folia JAR
+      - name: Build Folia Server
+        run: |
+          ./gradlew applyPatches
+          ./gradlew createMojmapPaperclipJar  # 使用合规构建方式
+
+      # 步骤 5: 将 JAR 发布为 Release 附件
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/libs/*.jar  # 上传所有构建产物
+          tag_name: ${{ github.ref }}  # 使用 Release 标签
+
+      # 步骤 6: 同步到 GitHub Packages（可选）
+      - name: Publish to GitHub Packages
+        run: |
+          ./gradlew publish  # 需提前配置 build.gradle 的 publishing 部分
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
